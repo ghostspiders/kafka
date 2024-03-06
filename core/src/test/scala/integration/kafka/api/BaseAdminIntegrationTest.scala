@@ -21,7 +21,7 @@ import java.util.Properties
 import java.util.concurrent.ExecutionException
 import kafka.security.authorizer.AclEntry
 import kafka.server.KafkaConfig
-import kafka.utils.Logging
+import kafka.utils.{Logging, TestInfoUtils}
 import kafka.utils.TestUtils._
 import org.apache.kafka.clients.admin.{Admin, AdminClientConfig, CreateTopicsOptions, CreateTopicsResult, DescribeClusterOptions, DescribeTopicsOptions, NewTopic, TopicDescription}
 import org.apache.kafka.common.Uuid
@@ -31,6 +31,8 @@ import org.apache.kafka.common.resource.ResourceType
 import org.apache.kafka.common.utils.Utils
 import org.junit.jupiter.api.Assertions._
 import org.junit.jupiter.api.{AfterEach, BeforeEach, Test, TestInfo, Timeout}
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 
 import scala.jdk.CollectionConverters._
 import scala.collection.Seq
@@ -44,7 +46,7 @@ import scala.compat.java8.OptionConverters._
  * authentication/authorization layers, we may add the test case here.
  */
 @Timeout(120)
-abstract class BaseAdminIntegrationTest extends IntegrationTestHarness with Logging {
+class BaseAdminIntegrationTest extends IntegrationTestHarness with Logging {
   def brokerCount = 3
   override def logDirCount = 2
 
@@ -66,8 +68,9 @@ abstract class BaseAdminIntegrationTest extends IntegrationTestHarness with Logg
     super.tearDown()
   }
 
-  @Test
-  def testCreateDeleteTopics(): Unit = {
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk", "kraft"))
+  def testCreateDeleteTopics(quorum: String): Unit = {
     client = Admin.create(createConfig)
     val topics = Seq("mytopic", "mytopic2", "mytopic3")
     val newTopics = Seq(
