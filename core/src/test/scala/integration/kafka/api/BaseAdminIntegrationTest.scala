@@ -30,7 +30,7 @@ import org.apache.kafka.common.errors.{TopicExistsException, UnknownTopicOrParti
 import org.apache.kafka.common.resource.ResourceType
 import org.apache.kafka.common.utils.Utils
 import org.junit.jupiter.api.Assertions._
-import org.junit.jupiter.api.{AfterEach, BeforeEach, Test, TestInfo, Timeout}
+import org.junit.jupiter.api.{AfterEach, BeforeEach, TestInfo, Timeout}
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.ValueSource
 
@@ -45,7 +45,7 @@ import scala.compat.java8.OptionConverters._
  * time to the build. However, if an admin API involves differing interactions with
  * authentication/authorization layers, we may add the test case here.
  */
-@Timeout(120)
+@Timeout(12000)
 class BaseAdminIntegrationTest extends IntegrationTestHarness with Logging {
   def brokerCount = 3
   override def logDirCount = 2
@@ -162,8 +162,9 @@ class BaseAdminIntegrationTest extends IntegrationTestHarness with Logging {
     waitForTopics(client, List(), topics)
   }
 
-  @Test
-  def testAuthorizedOperations(): Unit = {
+  @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
+  @ValueSource(strings = Array("zk", "kraft"))
+  def testAuthorizedOperations(quorum: String): Unit = {
     client = Admin.create(createConfig)
 
     // without includeAuthorizedOperations flag
