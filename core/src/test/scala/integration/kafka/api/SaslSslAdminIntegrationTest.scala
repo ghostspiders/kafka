@@ -29,6 +29,7 @@ import org.apache.kafka.common.resource.PatternType.LITERAL
 import org.apache.kafka.common.resource.ResourceType.{GROUP, TOPIC}
 import org.apache.kafka.common.resource.{PatternType, Resource, ResourcePattern, ResourcePatternFilter, ResourceType}
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
+import org.apache.kafka.metadata.authorizer.StandardAuthorizer
 import org.apache.kafka.server.authorizer.Authorizer
 import org.apache.kafka.storage.internals.log.LogConfig
 import org.junit.jupiter.api.Assertions._
@@ -46,9 +47,9 @@ import scala.util.{Failure, Success, Try}
 class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetup {
   val clusterResourcePattern = new ResourcePattern(ResourceType.CLUSTER, Resource.CLUSTER_NAME, PatternType.LITERAL)
 
-  val authorizationAdmin = new AclAuthorizationAdmin(classOf[AclAuthorizer], classOf[AclAuthorizer])
+  var authorizationAdmin: AclAuthorizationAdmin = _
 
-  this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "true")
+  var sslTestInfo: TestInfo = _
 
   override protected def securityProtocol = SecurityProtocol.SASL_SSL
   override protected lazy val trustStoreFile = Some(TestUtils.tempFile("truststore", ".jks"))
@@ -64,12 +65,24 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
 
   @BeforeEach
   override def setUp(testInfo: TestInfo): Unit = {
+    sslTestInfo = testInfo
+    if (TestInfoUtils.isKRaft(sslTestInfo)) {
+      authorizationAdmin = new AclAuthorizationAdmin(classOf[StandardAuthorizer], classOf[StandardAuthorizer])
+    } else {
+      authorizationAdmin = new AclAuthorizationAdmin(classOf[AclAuthorizer], classOf[AclAuthorizer])
+      this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "true")
+    }
+
     setUpSasl()
     super.setUp(testInfo)
   }
 
   def setUpSasl(): Unit = {
-    startSasl(jaasSections(Seq("GSSAPI"), Some("GSSAPI"), Both, JaasTestUtils.KafkaServerContextName))
+    if (!TestInfoUtils.isKRaft(sslTestInfo)) {
+      startSasl(jaasSections(Seq("GSSAPI"), Some("GSSAPI"), Both, JaasTestUtils.KafkaServerContextName))
+    }else{
+      startSasl(jaasSections(Seq("GSSAPI"), Some("GSSAPI"), KafkaSasl, JaasTestUtils.KafkaServerContextName))
+    }
   }
 
   @AfterEach
@@ -477,7 +490,7 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
     client.describeAcls(allTopicAcls).values.get().asScala.toSet
   }
 
-  class AclAuthorizationAdmin(authorizerClass: Class[_ <: AclAuthorizer], authorizerForInitClass: Class[_ <: AclAuthorizer]) {
+  class AclAuthorizationAdmin(authorizerClass: Class[_ <: Authorizer], authorizerForInitClass: Class[_ <: Authorizer]) {
 
     def authorizerClassName: String = authorizerClass.getName
 
