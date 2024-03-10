@@ -16,10 +16,10 @@ import java.util
 import kafka.security.authorizer.AclAuthorizer
 import kafka.security.authorizer.AclEntry.{WildcardHost, WildcardPrincipalString}
 import kafka.server.KafkaConfig
-import kafka.utils.{CoreUtils, JaasTestUtils, TestInfoUtils, TestUtils}
+import kafka.utils.{JaasTestUtils, TestInfoUtils, TestUtils}
 import kafka.utils.TestUtils._
 import org.apache.kafka.clients.admin._
-import org.apache.kafka.common.Uuid
+import org.apache.kafka.common.{Endpoint, Uuid}
 import org.apache.kafka.common.acl._
 import org.apache.kafka.common.acl.AclOperation.{ALL, ALTER, ALTER_CONFIGS, CLUSTER_ACTION, CREATE, DELETE, DESCRIBE}
 import org.apache.kafka.common.acl.AclPermissionType.{ALLOW, DENY}
@@ -29,7 +29,9 @@ import org.apache.kafka.common.resource.PatternType.LITERAL
 import org.apache.kafka.common.resource.ResourceType.{GROUP, TOPIC}
 import org.apache.kafka.common.resource.{PatternType, Resource, ResourcePattern, ResourcePatternFilter, ResourceType}
 import org.apache.kafka.common.security.auth.{KafkaPrincipal, SecurityProtocol}
+import org.apache.kafka.controller.MockAclMutator
 import org.apache.kafka.metadata.authorizer.StandardAuthorizer
+import org.apache.kafka.metadata.authorizer.StandardAuthorizerTest.AuthorizerTestServerInfo
 import org.apache.kafka.server.authorizer.Authorizer
 import org.apache.kafka.storage.internals.log.LogConfig
 import org.junit.jupiter.api.Assertions._
@@ -48,14 +50,18 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
   val clusterResourcePattern = new ResourcePattern(ResourceType.CLUSTER, Resource.CLUSTER_NAME, PatternType.LITERAL)
 
   var authorizationAdmin: AclAuthorizationAdmin = _
-
+  private final val PLAINTEXT = new Endpoint("PLAINTEXT", SecurityProtocol.PLAINTEXT, "127.0.0.1", 9020)
   var sslTestInfo: TestInfo = _
 
   override protected def securityProtocol = SecurityProtocol.SASL_SSL
   override protected lazy val trustStoreFile = Some(TestUtils.tempFile("truststore", ".jks"))
 
   override def generateConfigs: Seq[KafkaConfig] = {
-    this.serverConfig.setProperty(KafkaConfig.AuthorizerClassNameProp, authorizationAdmin.authorizerClassName)
+    if (TestInfoUtils.isKRaft(sslTestInfo)) {
+      this.serverConfig.setProperty(KafkaConfig.AuthorizerClassNameProp, authorizationAdmin.getClass.getName)
+    } else {
+      this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "true")
+    }
     super.generateConfigs
   }
 
@@ -66,12 +72,7 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
   @BeforeEach
   override def setUp(testInfo: TestInfo): Unit = {
     sslTestInfo = testInfo
-    if (TestInfoUtils.isKRaft(sslTestInfo)) {
-      authorizationAdmin = new AclAuthorizationAdmin(classOf[StandardAuthorizer], classOf[StandardAuthorizer])
-    } else {
-      authorizationAdmin = new AclAuthorizationAdmin(classOf[AclAuthorizer], classOf[AclAuthorizer])
-      this.serverConfig.setProperty(KafkaConfig.ZkEnableSecureAclsProp, "true")
-    }
+    authorizationAdmin = new AclAuthorizationAdmin(testInfo)
 
     setUpSasl()
     super.setUp(testInfo)
@@ -107,7 +108,7 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
     new AccessControlEntry("User:*", "*", AclOperation.ALL, AclPermissionType.ALLOW))
 
   @ParameterizedTest(name = TestInfoUtils.TestWithParameterizedQuorumName)
-  @ValueSource(strings = Array("kraft"))
+  @ValueSource(strings = Array("zk"))
   def testAclOperations(quorum: String): Unit = {
     client = Admin.create(createConfig)
     val acl = new AclBinding(new ResourcePattern(ResourceType.TOPIC, "mytopic3", PatternType.LITERAL),
@@ -490,12 +491,18 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
     client.describeAcls(allTopicAcls).values.get().asScala.toSet
   }
 
-  class AclAuthorizationAdmin(authorizerClass: Class[_ <: Authorizer], authorizerForInitClass: Class[_ <: Authorizer]) {
-
-    def authorizerClassName: String = authorizerClass.getName
-
+  class AclAuthorizationAdmin(testInfo: TestInfo) {
+    var authorizer: Authorizer= _
     def initializeAcls(): Unit = {
-      val authorizer = CoreUtils.createObject[Authorizer](authorizerForInitClass.getName)
+        if (TestInfoUtils.isKRaft(testInfo)) {
+          val standardAuthorizer = new StandardAuthorizer
+          val aclMutator = new MockAclMutator(standardAuthorizer)
+          standardAuthorizer.start(new AuthorizerTestServerInfo(Collections.singletonList(PLAINTEXT)))
+          standardAuthorizer.setAclMutator(aclMutator)
+          authorizer = standardAuthorizer
+      }else{
+          authorizer = new AclAuthorizer
+      }
       try {
         authorizer.configure(configs.head.originals())
         val ace = new AccessControlEntry(WildcardPrincipalString, WildcardHost, ALL, ALLOW)
@@ -538,5 +545,6 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
       new AccessControlEntry(new KafkaPrincipal(KafkaPrincipal.USER_TYPE, "*").toString,
         WildcardHost, operation, permissionType)
     }
+
   }
 }
