@@ -16,7 +16,7 @@ import java.util
 import kafka.security.authorizer.AclAuthorizer
 import kafka.security.authorizer.AclEntry.{WildcardHost, WildcardPrincipalString}
 import kafka.server.KafkaConfig
-import kafka.utils.{JaasTestUtils, TestInfoUtils, TestUtils}
+import kafka.utils.{CoreUtils, JaasTestUtils, TestInfoUtils, TestUtils}
 import kafka.utils.TestUtils._
 import org.apache.kafka.clients.admin._
 import org.apache.kafka.common.{Endpoint, Uuid}
@@ -501,7 +501,7 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
           standardAuthorizer.setAclMutator(aclMutator)
           authorizer = standardAuthorizer
       }else{
-          authorizer = new AclAuthorizer
+          authorizer = CoreUtils.createObject[Authorizer](AclAuthorizer.getClass.getName)
       }
       try {
         authorizer.configure(configs.head.originals())
