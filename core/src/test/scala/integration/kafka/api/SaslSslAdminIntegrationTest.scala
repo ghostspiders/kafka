@@ -72,10 +72,10 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
   @BeforeEach
   override def setUp(testInfo: TestInfo): Unit = {
     sslTestInfo = testInfo
-    authorizationAdmin = new AclAuthorizationAdmin(testInfo)
-
     setUpSasl()
     super.setUp(testInfo)
+    authorizationAdmin = new AclAuthorizationAdmin(testInfo)
+
   }
 
   def setUpSasl(): Unit = {
@@ -501,7 +501,7 @@ class SaslSslAdminIntegrationTest extends BaseAdminIntegrationTest with SaslSetu
           standardAuthorizer.setAclMutator(aclMutator)
           authorizer = standardAuthorizer
       }else{
-          authorizer = CoreUtils.createObject[Authorizer](AclAuthorizer.getClass.getName)
+          authorizer = CoreUtils.createObject[Authorizer](classOf[AclAuthorizer].getName)
       }
       try {
         authorizer.configure(configs.head.originals())
